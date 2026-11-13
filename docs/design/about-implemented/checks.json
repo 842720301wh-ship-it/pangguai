@@ -1,0 +1,17 @@
+{
+  "entries": 4,
+  "noLoginRequired": true,
+  "navigationAndHistory": true,
+  "reloadAndDirectEntry": true,
+  "originalImageDownloads": true,
+  "clipboard": true,
+  "nativeBridgeAndSaveErrors": true,
+  "widths": [
+    320,
+    390,
+    480,
+    900
+  ],
+  "externalOrMutationRequests": [],
+  "errors": []
+}
