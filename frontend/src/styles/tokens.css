@@ -1,0 +1,8 @@
+:root {
+  --color-accent: #353b46;
+  --color-text: #292e36;
+  --color-background: #fafbfc;
+  --color-panel: #f0f2f5;
+  --color-control-panel: #e3e7ed;
+  --el-color-primary: var(--color-accent);
+}
