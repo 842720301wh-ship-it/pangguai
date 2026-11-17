@@ -5,6 +5,28 @@ import { fileURLToPath } from 'node:url'
 
 export const root = fileURLToPath(new URL('../../', import.meta.url))
 export const metadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+export function resolvePowerShell() {
+  if (process.env.PANGUAI_POWERSHELL) return process.env.PANGUAI_POWERSHELL
+  const probe = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], {
+    windowsHide: true,
+    timeout: 10000,
+    encoding: 'utf8',
+  })
+  if (probe.status === 0 && Number(probe.stdout.trim()) >= 7) return 'pwsh'
+  if (process.platform === 'win32') {
+    const programFiles = process.env.ProgramFiles || 'C:/Program Files'
+    const standard = path.join(programFiles, 'PowerShell/7/pwsh.exe')
+    if (fs.existsSync(standard)) return standard
+    const builtin = path.join(
+      process.env.SystemRoot || 'C:/Windows',
+      'System32/WindowsPowerShell/v1.0/powershell.exe',
+    )
+    if (fs.existsSync(builtin)) return builtin
+  }
+  throw new Error(
+    'PowerShell was not found. Install PowerShell 7 or set PANGUAI_POWERSHELL to the full path of pwsh.exe.',
+  )
+}
 export function buildEnvironment() {
   const cache = path.join(root, '.cache')
   const directories = {

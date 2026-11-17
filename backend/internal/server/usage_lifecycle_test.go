@@ -15,27 +15,77 @@ import (
 
 type fakeLifecycle struct {
 	fakeUsageGateway
-	status    int
-	identity  platform.DeviceID
-	support   bool
-	stops     atomic.Int32
-	stopError bool
+	status            int
+	identity          platform.DeviceID
+	support           bool
+	stops             atomic.Int32
+	stopError         bool
+	deviceState       *platform.RecentDevice
+	detailError       bool
+	category          string
+	unconfirmed       bool
+	listWorkStatus    *int
+	listError         bool
+	listMissing       bool
+	confirmationError bool
+	syncError         bool
 }
 
 func (g *fakeLifecycle) SyncUsage(_ context.Context, token, category, sku string) (platform.UsageSync, error) {
-	if token != "fixture-private-token" || category != "04" || sku != "fixture-sku" {
+	if g.syncError {
+		return platform.UsageSync{}, errors.New("sync unavailable")
+	}
+	wantCategory := g.category
+	if wantCategory == "" {
+		wantCategory = "04"
+	}
+	if token != "fixture-private-token" || category != wantCategory || sku != "fixture-sku" {
 		panic("incorrect saved usage context")
 	}
 	return platform.UsageSync{Status: &g.status, Identify: g.identity}, nil
 }
 func (g *fakeLifecycle) UsageCommandConfirmed(context.Context, string, string) (bool, error) {
-	return true, nil
+	if g.confirmationError {
+		return false, errors.New("receipt expired")
+	}
+	return !g.unconfirmed, nil
 }
 func (g *fakeLifecycle) StartupStatus(_ context.Context, token, order string) (bool, error) {
 	if token != "fixture-private-token" || order != "fixture-order" {
 		panic("wrong receipt")
 	}
-	return true, nil
+	if g.confirmationError {
+		return false, errors.New("receipt expired")
+	}
+	return !g.unconfirmed, nil
+}
+func (g *fakeLifecycle) RecentDevices(ctx context.Context, token, category string) ([]platform.RecentDevice, error) {
+	if g.listError {
+		return nil, errors.New("list unavailable")
+	}
+	if g.listMissing {
+		return nil, nil
+	}
+	list, err := g.fakeUsageGateway.RecentDevices(ctx, token, category)
+	if g.listWorkStatus != nil {
+		list[0].WorkStatus = *g.listWorkStatus
+		if g.category != "" {
+			list[0].Category = g.category
+		}
+	}
+	return list, err
+}
+func (g *fakeLifecycle) ScannedDeviceState(_ context.Context, token, device string) (platform.RecentDevice, error) {
+	if token != "fixture-private-token" || device != "fixture-device" {
+		panic("wrong details context")
+	}
+	if g.detailError {
+		return platform.RecentDevice{}, errors.New("details unavailable")
+	}
+	if g.deviceState == nil {
+		return platform.RecentDevice{}, nil
+	}
+	return *g.deviceState, nil
 }
 func (g *fakeLifecycle) UsageControl(_ context.Context, token, device string) (platform.UsageControl, error) {
 	if token != "fixture-private-token" || device != "fixture-device" {
@@ -52,6 +102,30 @@ func (g *fakeLifecycle) EndUsage(_ context.Context, token, category, device, ord
 		return errors.New("timeout after end command")
 	}
 	return nil
+}
+
+func TestOwnTerminalSessionEndsWhileDeviceAlreadyBusyAgain(t *testing.T) {
+	for _, status := range []int{3, 5} {
+		g := &fakeLifecycle{status: 1, identity: "fixture-order", support: true}
+		h, store := lifecycleHandler(t, g)
+		startFixtureSession(t, h)
+		if v := readFixtureState(t, h); v.State != "running" {
+			t.Fatal("own session not bound", v)
+		}
+		g.status = status
+		busy := 20
+		g.listWorkStatus = &busy
+		g.deviceState = &platform.RecentDevice{GoodsID: "fixture-device", Category: "04", WorkStatus: busy}
+		if v := readFixtureState(t, New(store, g, "")); v.State != "finished" || v.CanStop {
+			t.Fatal("another user's busy device retained own terminal session", v)
+		}
+		if pending, _ := store.UsageAttemptPending("fixture-account", "fixture-device"); pending {
+			t.Fatal("own terminal session retained duplicate guard")
+		}
+		if g.stops.Load() != 0 || g.starts.Load() != 1 {
+			t.Fatal("reconciliation controlled another user's equipment")
+		}
+	}
 }
 
 func TestAmbiguousStopSurvivesRestartWithoutResending(t *testing.T) {

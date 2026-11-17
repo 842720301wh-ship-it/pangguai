@@ -1,10 +1,10 @@
 # Android 测试版
 
-应用名：水到渠成。包名：`com.panguai.account`。当前版本 0.4.0 / versionCode 4，最低 Android 8，arm64-v8a。显示名与 APK 文件名前缀从根目录 `package.json` 的 `panguai.displayName` 读取。包名、JNI、签名和既有账号加密格式保持兼容，可覆盖更新，勿卸载以免丢失手机私有账号。
+应用名：水到渠成。包名：`com.panguai.account`。当前版本 0.4.4 / versionCode 8，最低 Android 8，arm64-v8a。显示名与 APK 文件名前缀从根目录 `package.json` 的 `panguai.displayName` 读取。包名、JNI、签名和既有账号加密格式保持兼容，可覆盖更新，勿卸载以免丢失手机私有账号。
 
 ## 打包
 
-在项目根目录执行 `npm run build`，输出 `release/Android/水到渠成-0.4.0-debug.apk`。它会检查 Go 测试/vet、前端类型与模板，再构建前后端和 APK。工具路径与可配置环境变量见根 README。构建不自动安装；首次下载公开 AndroidX/ZXing 依赖需要网络。
+在项目根目录执行 `npm run build`，输出 `release/Android/水到渠成-0.4.4-debug.apk`。它会检查 Go 测试/vet、前端类型与模板，再构建前后端和 APK。工具路径与可配置环境变量见根 README。构建不自动安装；首次下载公开 AndroidX/ZXing 依赖需要网络。
 
 ## 原生能力
 

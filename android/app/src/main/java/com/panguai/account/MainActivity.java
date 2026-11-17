@@ -5,8 +5,6 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.graphics.Color;
 import android.net.Uri;
-import android.view.View;
-import android.view.WindowInsets;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -15,6 +13,10 @@ import android.webkit.WebResourceResponse;
 import androidx.activity.ComponentActivity;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import com.journeyapps.barcodescanner.ScanContract;
 import com.journeyapps.barcodescanner.ScanOptions;
 import android.widget.FrameLayout;
@@ -36,19 +38,23 @@ public final class MainActivity extends ComponentActivity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        // Apply system spacing ourselves on every Android version, including edge-to-edge.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         getWindow().setStatusBarColor(Color.rgb(250,251,252));
         getWindow().setNavigationBarColor(Color.WHITE);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView()).setAppearanceLightStatusBars(true);
+        WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView()).setAppearanceLightNavigationBars(true);
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(Color.rgb(250,251,252));
-        frame.setOnApplyWindowInsetsListener((view, insets) -> {
-            if (android.os.Build.VERSION.SDK_INT >= 30) {
-                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
-                view.setPadding(bars.left,bars.top,bars.right,bars.bottom);
-            } else view.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
-            return insets;
+        ViewCompat.setOnApplyWindowInsetsListener(frame, (view, insets) -> {
+            Insets safeArea = insets.getInsets(WindowInsetsCompat.Type.systemBars()
+                | WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.ime());
+            view.setPadding(safeArea.left, safeArea.top, safeArea.right, safeArea.bottom);
+            // The WebView is already inside the safe area; do not apply it a second time in CSS.
+            return WindowInsetsCompat.CONSUMED;
         });
         setContentView(frame);
+        ViewCompat.requestApplyInsets(frame);
         TextView loading = new TextView(this);
         loading.setText("正在启动本机服务…"); loading.setGravity(android.view.Gravity.CENTER);
         frame.addView(loading,new FrameLayout.LayoutParams(-1,-1));

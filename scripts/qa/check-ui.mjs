@@ -1,6 +1,7 @@
 import { chromium } from 'playwright-core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { checkNavigationLayout } from './navigation-layout.mjs'
 
 const root = path.resolve(import.meta.dirname, '../..')
 const out = path.join(root, 'docs/design')
@@ -50,7 +51,10 @@ let feeChanged = true
 let waterPhase = 'idle',
   showerPhase = 'running',
   stateReads = 0
-let legacyUnknown = false
+let legacyUnknown = false,
+  failUsageRead = false
+let waterDeviceBusy = false,
+  failWaterOptions = 0
 const waterStarted = new Date(Date.now() - 20000).toISOString(),
   showerStarted = new Date(Date.now() - 206000).toISOString()
 try {
@@ -104,10 +108,19 @@ try {
         mode: 'readonly',
       }
     else if (pathname.endsWith('/devices')) {
+      devices[0].workStatus = waterDeviceBusy ? 20 : 10
       if (showerPhase === 'finished') devices[1].workStatus = 10
       body = { devices, mode: 'readonly' }
     } else if (pathname.endsWith('/usage/state')) {
       stateReads++
+      if (failUsageRead) {
+        await route.fulfill({
+          status: 502,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'fixture state unavailable' }),
+        })
+        return
+      }
       const water = pathname.includes('fixture_water'),
         state = water ? waterPhase : pathname.includes('fixture_shower') ? showerPhase : 'idle'
       body = {
@@ -123,7 +136,16 @@ try {
       }
       if (waterPhase === 'starting' && water) waterPhase = 'running'
       if (showerPhase === 'stopping' && !water) showerPhase = 'finished'
-    } else if (pathname.endsWith('/usage/options'))
+    } else if (pathname.endsWith('/usage/options')) {
+      if (pathname.includes('fixture_water') && failWaterOptions > 0) {
+        failWaterOptions--
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: '设备结算中，请稍后重试' }),
+        })
+        return
+      }
       body = {
         device: {
           goods_id: 'fixture_water',
@@ -134,7 +156,7 @@ try {
         start_supported: true,
         mode: 'readonly',
       }
-    else if (pathname.endsWith('/usage/prepare')) {
+    } else if (pathname.endsWith('/usage/prepare')) {
       const input = req.postDataJSON()
       if (
         input.sku_id !== hot.skuId ||
@@ -338,6 +360,69 @@ try {
   await page.getByRole('button', { name: '核对 301 饮水机', exact: true }).waitFor()
   if ((await page.locator('.usage-duration').first().innerText()) !== '--:--')
     throw Error('legacy missing start time rendered as real duration')
+  const beforeCheck = mutations.length
+  await page.getByRole('button', { name: '核对 301 饮水机', exact: true }).click()
+  await page.getByText('平台尚未确认本次使用是否结束，请在官方 App 核对', { exact: true }).waitFor()
+  for (let i = 0; i < 3; i++) {
+    await page.getByRole('button', { name: '核对 301 饮水机', exact: true }).click()
+    await page
+      .getByText('平台尚未确认本次使用是否结束，请在官方 App 核对', { exact: true })
+      .last()
+      .waitFor()
+  }
+  await page.waitForTimeout(400)
+  if ((await page.locator('.el-message--warning:visible').count()) > 1)
+    throw Error(
+      'repeated verification stacked warning messages: ' +
+        JSON.stringify(await page.locator('.el-message--warning:visible').allTextContents()),
+    )
+  failUsageRead = true
+  await page.getByRole('button', { name: '核对 301 饮水机', exact: true }).click()
+  await page
+    .getByText('核对失败，暂时无法查询平台状态，请稍后重试或在官方 App 查看', { exact: true })
+    .waitFor()
+  failUsageRead = false
+  waterPhase = 'finished'
+  await page.getByRole('button', { name: '核对 301 饮水机', exact: true }).click()
+  await page.getByText('本地使用记录已解除，设备列表已刷新', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '启动 301 饮水机', exact: true }).waitFor()
+  if (mutations.length !== beforeCheck) throw Error('manual verification controlled equipment')
+  // A physical stop may settle before latestUsed catches up. The end reload
+  // skips this busy device's options; a later idle list must fetch them again.
+  waterDeviceBusy = true
+  waterPhase = 'running'
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByRole('button', { name: '查看 301 饮水机', exact: true }).waitFor()
+  waterPhase = 'finished'
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await page.locator('.usage-duration').waitFor({ state: 'hidden' })
+  await page.waitForLoadState('networkidle')
+  waterDeviceBusy = false
+  failWaterOptions = 1
+  const retry = page.getByRole('button', { name: '刷新 301 饮水机', exact: true })
+  const waterRate = page
+    .locator('.device-card')
+    .filter({ has: page.getByRole('heading', { name: '301 饮水机', exact: true }) })
+    .getByText('0.30 元/L', { exact: true })
+  await retry.waitFor({ timeout: 25000 })
+  await page.waitForLoadState('networkidle')
+  await retry.click()
+  await page.getByText('服务信息已更新，请核对服务和费率后再次点击启动', { exact: true }).waitFor()
+  await waterRate.waitFor()
+  await page.getByRole('button', { name: '启动 301 饮水机', exact: true }).waitFor()
+  if (mutations.length !== beforeCheck) throw Error('service recovery controlled equipment')
+  // Also cover automatic recovery on the idle transition without a click.
+  waterDeviceBusy = true
+  waterPhase = 'running'
+  await page.reload({ waitUntil: 'networkidle' })
+  waterPhase = 'finished'
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await page.locator('.usage-duration').waitFor({ state: 'hidden' })
+  await page.waitForLoadState('networkidle')
+  waterDeviceBusy = false
+  await waterRate.waitFor({ timeout: 25000 })
+  await page.getByRole('button', { name: '启动 301 饮水机', exact: true }).waitFor()
+  if (mutations.length !== beforeCheck) throw Error('idle recovery controlled equipment')
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true })
     document.dispatchEvent(new Event('visibilitychange'))
@@ -353,6 +438,7 @@ try {
   await page.setViewportSize({ width: 320, height: 740 })
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
     throw Error('small-screen horizontal overflow')
+  const navigationLayouts = await checkNavigationLayout(page, out)
   const board = await context.newPage()
   await board.setViewportSize({ width: 1060, height: 1020 })
   const imgs = await Promise.all(
@@ -369,6 +455,7 @@ try {
   const result = {
     appName: true,
     navbar: true,
+    navigationLayouts,
     walletFenConversion: true,
     separateWallets: true,
     originalCardShape: true,
@@ -386,6 +473,11 @@ try {
     unsupportedWaterEndHidden: true,
     pollingPausesInBackground: true,
     legacyUnknownDoesNotInventTime: true,
+    manualCheckShowsResultAndFailure: true,
+    repeatedCheckDoesNotStackWarnings: true,
+    confirmedEndRestoresStartOptions: true,
+    delayedIdleRestoresServiceOptions: true,
+    failedServiceReadCanRetryWithoutStarting: true,
     inlineServiceSelection: true,
     deniedLocationNoRequest: true,
     staleLocationNoRequest: true,

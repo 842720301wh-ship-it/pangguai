@@ -60,11 +60,13 @@ func (s *Server) releaseUsage(account, device string) error {
 
 // Called under the per-device lock. Reads never issue unlock/end/payment commands.
 func (s *Server) readLiveUsage(ctx context.Context, rec accounts.Record, device string, force bool) (liveUsage, error) {
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
 	key := rec.Profile.ID + "\x00" + device
 	if !force {
 		if cached, ok := s.liveCache.Load(key); ok {
 			view := cached.(liveUsage)
-			if time.Since(view.UpdatedAt) < 3*time.Second {
+			if time.Since(view.UpdatedAt) < time.Second {
 				return view, nil
 			}
 		}
@@ -97,18 +99,23 @@ func (s *Server) readLiveUsage(ctx context.Context, rec accounts.Record, device 
 	}
 	// Receipt confirmation is account-bound; a shared machine's busy bit is not ownership.
 	if !e.Confirmed {
+		receiptCtx, cancelReceipt := context.WithTimeout(ctx, 5*time.Second)
 		if e.MessageID != "" {
-			e.Confirmed, err = g.UsageCommandConfirmed(ctx, rec.Token, e.MessageID)
+			e.Confirmed, err = g.UsageCommandConfirmed(receiptCtx, rec.Token, e.MessageID)
 		} else if e.OrderNo != "" {
-			e.Confirmed, err = g.StartupStatus(ctx, rec.Token, e.OrderNo)
+			e.Confirmed, err = g.StartupStatus(receiptCtx, rec.Token, e.OrderNo)
 		}
-		if err != nil {
-			return view, err
-		}
+		cancelReceipt()
 	}
-	live, err := g.SyncUsage(ctx, rec.Token, e.Category, e.SKU)
-	if err != nil {
-		return view, err
+	// Receipts can expire independently of the physical device. A failed
+	// receipt/sync read must not prevent fresh device-state reconciliation.
+	syncCtx, cancelSync := context.WithTimeout(ctx, 5*time.Second)
+	live, err := g.SyncUsage(syncCtx, rec.Token, e.Category, e.SKU)
+	cancelSync()
+	syncUnavailable := err != nil
+	if syncUnavailable {
+		// Discard partial responses; they cannot establish ownership or an end.
+		live = platform.UsageSync{}
 	}
 	identity := string(live.Identify)
 	mismatch := e.SyncID != "" && identity != "" && e.SyncID != identity
@@ -116,12 +123,15 @@ func (s *Server) readLiveUsage(ctx context.Context, rec accounts.Record, device 
 		e.SyncID = identity
 	}
 	switch {
+	case syncUnavailable:
+		e.State = "unknown"
+		view.Note = "使用状态接口暂不可用，正在独立核对设备是否空闲"
 	case mismatch:
 		e.State = "unknown"
 		view.Note = "设备使用标识已变化，请核对官方 App"
 	case live.Fault():
 		e.State = "unknown"
-		view.Note = "平台报告设备异常，请在官方 App 核对"
+		view.Note = "平台尚未确认本次使用结果，正在核对设备状态"
 	case live.Terminal() && e.SyncID != "" && (identity == e.SyncID || identity == "") && e.ObservedRunning:
 		e.State = "finished"
 		e.FinishedAt = time.Now().UTC()
@@ -139,7 +149,24 @@ func (s *Server) readLiveUsage(ctx context.Context, rec accounts.Record, device 
 			e.State = "starting"
 		}
 	}
+	// Hardware stops can leave sync at 6 (or skip the running snapshot while
+	// the app is hidden). Reconcile against fresh details, never the UI list.
+	// Two spaced idle observations are required; a single fault is not an end.
+	if e.State != "finished" {
+		ended, note := s.confirmDeviceEnd(ctx, rec, device, &e, live, mismatch, syncUnavailable)
+		if note != "" {
+			view.Note = note
+		}
+		if ended {
+			e.State = "finished"
+			e.FinishedAt = time.Now().UTC()
+		} else if !e.IdleSince.IsZero() {
+			e.State = "unknown"
+		}
+	}
 	saved := e
+	// A failed upstream read is handled above, not a local persistence error.
+	err = nil
 	if e != original {
 		e.LastCheckedAt = time.Now().UTC()
 		saved, err = s.store.UpdateUsageSession(rec.Profile.ID, device, e.ID, func(current *accounts.UsageSession) error {
@@ -182,6 +209,72 @@ func (s *Server) readLiveUsage(ctx context.Context, rec accounts.Record, device 
 	}
 	s.liveCache.Store(key, view)
 	return view, nil
+}
+
+func (s *Server) confirmDeviceEnd(ctx context.Context, rec accounts.Record, device string, e *accounts.UsageSession, live platform.UsageSync, mismatch, syncUnavailable bool) (bool, string) {
+	// A confirmed startup may have happened entirely in the background. Give
+	// startup propagation time before using idle as evidence in that case.
+	// An old startup receipt may no longer be queryable after hardware stop.
+	// Expiry alone never releases it: fresh, spaced idle evidence is still required.
+	// A missing receipt must not suppress those reads for the 32-minute
+	// duplicate-attempt lifetime. Allow two minutes for startup propagation.
+	stale := !e.StartedAt.IsZero() && time.Since(e.StartedAt) >= 2*time.Minute
+	eligible := (e.Confirmed || stale) && !mismatch && (syncUnavailable || live.Fault() || live.Terminal()) &&
+		(live.Identify == "" || (e.SyncID != "" && string(live.Identify) == e.SyncID)) &&
+		(e.ObservedRunning || (!e.StartedAt.IsZero() && time.Since(e.StartedAt) >= 30*time.Second))
+	if !eligible {
+		e.IdleSince = time.Time{}
+		if !e.Confirmed && !stale {
+			return false, "尚未确认本次启动回执，暂未解除本地使用保护"
+		}
+		return false, ""
+	}
+	g, ok := s.platform.(interface {
+		ScannedDeviceState(context.Context, string, string) (platform.RecentDevice, error)
+	})
+	if !ok {
+		e.IdleSince = time.Time{}
+		return false, "暂时无法查询设备最新状态，未解除本地使用保护"
+	}
+	detailCtx, cancelDetails := context.WithTimeout(ctx, 5*time.Second)
+	fresh, err := g.ScannedDeviceState(detailCtx, rec.Token, device)
+	cancelDetails()
+	if err != nil || string(fresh.GoodsID) != device || fresh.Category != e.Category {
+		e.IdleSince = time.Time{}
+		return false, "未能核实设备最新状态，请稍后重试或在官方 App 核对"
+	}
+	// Some real /goods/normal/details responses omit workStatus. A fresh
+	// account-bound /goods/latestUsed read supplies it; never use the UI cache.
+	if fresh.WorkStatus == 0 {
+		if g, ok := s.platform.(deviceGateway); ok {
+			listCtx, cancelList := context.WithTimeout(ctx, 5*time.Second)
+			list, err := g.RecentDevices(listCtx, rec.Token, "")
+			cancelList()
+			if err == nil {
+				for _, d := range list {
+					if string(d.GoodsID) == device && d.Category == e.Category {
+						fresh.WorkStatus = d.WorkStatus
+						break
+					}
+				}
+			}
+		}
+	}
+	if fresh.WorkStatus != 10 {
+		e.IdleSince = time.Time{}
+		if fresh.WorkStatus == 0 {
+			return false, "平台尚未提供可确认的设备状态，未解除本地使用保护"
+		}
+		return false, "平台仍报告设备非空闲，未解除本地使用保护"
+	}
+	if e.IdleSince.IsZero() {
+		e.IdleSince = time.Now().UTC()
+		return false, "设备已报告空闲，正在复核本次使用是否结束"
+	}
+	if time.Since(e.IdleSince) < 5*time.Second {
+		return false, "设备已报告空闲，正在复核本次使用是否结束"
+	}
+	return true, "设备已确认空闲，旧的本地使用记录已解除；费用请在官方 App 核对"
 }
 
 // Old versions persisted only a timed duplicate guard. It can be released early

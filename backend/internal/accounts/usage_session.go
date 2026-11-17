@@ -27,6 +27,7 @@ type UsageSession struct {
 	ObservedRunning bool      `json:"observed_running"`
 	StopAttempted   bool      `json:"stop_attempted"`
 	LastCheckedAt   time.Time `json:"last_checked_at,omitempty"`
+	IdleSince       time.Time `json:"idle_since,omitempty"`
 }
 
 func (s *Store) readUsageSessions() (map[string]UsageSession, error) {

@@ -33,7 +33,9 @@ const action = computed(() =>
           ? '查看'
           : '同步中'
       : idle.value
-        ? '启动'
+        ? !props.options
+          ? '刷新'
+          : '启动'
         : '查看',
 )
 const status = computed(() =>
@@ -101,7 +103,8 @@ const cost = computed(() =>
       <div class="device-facts">
         <template v-if="active">
           <div>
-            <span>本次时长</span><strong class="usage-duration">{{ duration }}</strong>
+            <span>{{ usage?.state === 'unknown' ? '距启动请求' : '本次时长' }}</span
+            ><strong class="usage-duration">{{ duration }}</strong>
           </div>
           <div>
             <span>本次费用</span><strong class="usage-cost">{{ cost }}</strong>

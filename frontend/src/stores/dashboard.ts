@@ -31,6 +31,13 @@ const displayName = computed(() =>
     ? maskPhone(currentAccount.value.name)
     : '胖乖用户',
 )
+async function refreshUsageOptions(device: string) {
+  const id = state.accountID,
+    version = epoch
+  if (!id) return
+  const options = await getUsageOptions(id, device)
+  if (id === state.accountID && version === epoch) state.options[device] = options
+}
 async function loadAccount() {
   const version = ++epoch,
     id = state.accountID
@@ -66,10 +73,11 @@ async function loadAccount() {
 }
 let usageReading = false
 async function refreshUsage() {
-  if (usageReading || !state.accountID) return
+  if (usageReading || !state.accountID) return false
   usageReading = true
   const id = state.accountID,
     version = epoch
+  let ended = false
   try {
     await Promise.all(
       state.devices.map(async (d) => {
@@ -80,8 +88,16 @@ async function refreshUsage() {
             id === state.accountID &&
             version === epoch &&
             revision === (usageRevisions[d.goodsId] ?? 0)
-          )
+          ) {
+            const previous = state.usage[d.goodsId]?.state
+            if (
+              previous &&
+              ['starting', 'running', 'stopping', 'unknown'].includes(previous) &&
+              ['finished', 'idle'].includes(live.state)
+            )
+              ended = true
             state.usage[d.goodsId] = live
+          }
         } catch {
           if (
             id === state.accountID &&
@@ -104,6 +120,10 @@ async function refreshUsage() {
   } finally {
     usageReading = false
   }
+  // Reload service options too, so an end observed after reopening the app
+  // restores a usable start button rather than an empty service selection.
+  if (ended && id === state.accountID && version === epoch) await loadAccount()
+  return true
 }
 async function refreshDevices() {
   const id = state.accountID,
@@ -111,7 +131,22 @@ async function refreshDevices() {
   if (!id || state.busy) return
   try {
     const result = await getDevices(id)
-    if (id === state.accountID && version === epoch) state.devices = result.devices
+    if (id !== state.accountID || version !== epoch) return
+    const previous = state.devices
+    state.devices = result.devices
+    // The device list can lag behind session completion. Restore services when
+    // it finally becomes idle, and retry reads that failed during settlement.
+    await Promise.allSettled(
+      result.devices
+        .filter(
+          (d) =>
+            isIdle(d) &&
+            (!state.options[d.goodsId]?.start_supported ||
+              !state.options[d.goodsId]?.device.services.some((s) => s.scanAvailable) ||
+              !previous.some((p) => p.goodsId === d.goodsId && isIdle(p))),
+        )
+        .map((d) => refreshUsageOptions(d.goodsId)),
+    )
   } catch {
     /* Preserve the last state; never reset active sessions to idle on failure. */
   }
@@ -153,6 +188,7 @@ export function useDashboard() {
     selectService,
     refreshUsage,
     refreshDevices,
+    refreshUsageOptions,
     setUsageState,
   }
 }

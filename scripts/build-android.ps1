@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ReferenceRoot = $env:PANGUAI_ANDROID_REFERENCE_ROOT,
     [string]$JavaHome = $env:PANGUAI_JAVA_HOME,
     [string]$SdkDirectory = '',
@@ -13,7 +13,7 @@ if (-not $JavaHome) { $JavaHome = if ($env:JAVA_HOME) { $env:JAVA_HOME } else { 
 if (-not $SdkDirectory -and $env:PANGUAI_ANDROID_SDK) { $SdkDirectory = $env:PANGUAI_ANDROID_SDK }
 if (-not $SdkDirectory) { $SdkDirectory = Join-Path $ReferenceRoot '.workbench-local/android-sdk' }
 $gradle = if ($GradleExecutable) { $GradleExecutable } else { Join-Path $ReferenceRoot '.workbench-local/gradle-8.13/bin/gradle.bat' }
-$package = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
+$package = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $compiler = Join-Path $SdkDirectory 'ndk/28.2.13676358/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android26-clang.cmd'
 foreach ($tool in @((Join-Path $JavaHome 'bin/javac.exe'),$gradle,$compiler,(Join-Path $SdkDirectory 'platforms/android-36/android.jar'))) {
     if (-not (Test-Path -LiteralPath $tool)) { throw "Existing build tool missing: $tool. This script does not install host tools." }
@@ -52,7 +52,7 @@ try {
     }
     New-Item -ItemType Directory -Path $assetDirectory -Force | Out-Null
     Copy-Item -Path (Join-Path $projectRoot 'dist/web/*') -Destination (Join-Path $entry 'dist') -Recurse -Force
-    $config = Get-Content -LiteralPath (Join-Path $projectRoot 'data/platform.json') -Raw | ConvertFrom-Json
+    $config = Get-Content -LiteralPath (Join-Path $projectRoot 'data/platform.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     # Only the app protocol configuration is embedded; never account data, host proxy or MCP credentials.
     $runtime = @{app_secret=$config.app_secret;version=$config.version;device_id='generated-on-device';phone_brand='Android'} | ConvertTo-Json
     [IO.File]::WriteAllText((Join-Path $entry 'runtime-config.json'),$runtime,(New-Object Text.UTF8Encoding($false)))
@@ -75,7 +75,15 @@ try {
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     $target=Join-Path $release "$($package.panguai.displayName)-$($package.version)-debug.apk"
     Copy-Item -LiteralPath (Join-Path $projectRoot 'android/app/build/outputs/apk/debug/app-debug.apk') -Destination $target -Force
-    Get-FileHash -LiteralPath $target -Algorithm SHA256
+    $hashStream = [IO.File]::OpenRead($target)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = [BitConverter]::ToString($sha256.ComputeHash($hashStream)).Replace('-','')
+        Write-Host "SHA256: $hash"
+    } finally {
+        $hashStream.Dispose()
+        $sha256.Dispose()
+    }
     Write-Host "APK ready: $target"
 } finally {
     foreach($name in $names){[Environment]::SetEnvironmentVariable($name,$saved[$name],'Process')}

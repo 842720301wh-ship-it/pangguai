@@ -1,0 +1,9 @@
+.cache/
+.tools/
+node_modules/
+dist/
+release/
+work/
+data/
+android/
+backend/

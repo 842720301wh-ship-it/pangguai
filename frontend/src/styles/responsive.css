@@ -1,19 +1,15 @@
-@media (min-width: 600px) {
+@media (min-width: 600px) and (min-height: 600px) {
   body {
     padding: 28px 0;
   }
 
   .app-frame {
-    min-height: 844px;
+    height: calc(100vh - 56px);
+    height: calc(100dvh - 56px);
     border-radius: 28px;
     overflow: hidden;
     border: 1px solid #dfe4eb;
     box-shadow: 0 22px 70px #2430440d;
-  }
-
-  .bottom-nav {
-    position: absolute;
-    width: 100%;
   }
 
   .home-page {

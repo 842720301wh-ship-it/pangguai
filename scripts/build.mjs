@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { root, metadata, run, webBuild, backendCheck } from './lib/process.mjs'
+import { root, metadata, run, webBuild, backendCheck, resolvePowerShell } from './lib/process.mjs'
 
 const args = new Set(process.argv.slice(2))
 const modes = ['--web', '--backend', '--android'].filter((flag) => args.has(flag))
@@ -42,7 +42,7 @@ try {
   }
   if (mode === '--all' || mode === '--android') {
     console.log('[build] Android APK (Go library + Gradle + release/Android)')
-    const command = process.env.PANGUAI_POWERSHELL ?? 'pwsh'
+    const command = resolvePowerShell()
     const parameters = [
       '-NoProfile',
       '-File',

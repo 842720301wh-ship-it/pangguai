@@ -1,10 +1,20 @@
 .app-frame {
   max-width: 480px;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   margin: auto;
   background: #fafbfc;
-  padding-bottom: calc(82px + env(safe-area-inset-bottom));
+  padding-inline: var(--safe-area-left) var(--safe-area-right);
   position: relative;
+}
+
+.app-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior-y: contain;
 }
 
 .home-page {
@@ -361,12 +371,8 @@
 }
 
 .bottom-nav {
-  position: fixed;
   z-index: 10;
-  bottom: 0;
-  width: min(100%, 480px);
-  height: calc(75px + env(safe-area-inset-bottom));
-  padding: 10px 0 calc(12px + env(safe-area-inset-bottom));
+  padding: 8px 0 calc(8px + var(--safe-area-bottom));
   display: flex;
   border-top: 1px solid #e8ebef;
   background: #ffffffed;
@@ -375,11 +381,14 @@
 
 .bottom-nav button {
   flex: 1;
+  min-width: 0;
+  min-height: 48px;
   border: 0;
   background: none;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 5px;
   color: #a0a7b2;
   font-size: 11px;
@@ -633,17 +642,17 @@
 }
 
 .app-navbar {
-  position: sticky;
-  top: 0;
   z-index: 20;
-  display: grid;
-  grid-template-columns: 100px minmax(0, 1fr) 100px;
-  align-items: center;
-  height: calc(48px + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 13px 0;
+  padding: var(--safe-area-top) 13px 0;
   background: #fafbfced;
   backdrop-filter: blur(20px);
   border-bottom: 1px solid #e8ebef;
+}
+.app-navbar__content {
+  display: grid;
+  grid-template-columns: 43px minmax(0, 1fr) 43px;
+  align-items: center;
+  min-height: 48px;
 }
 .app-navbar__title {
   margin: 0;

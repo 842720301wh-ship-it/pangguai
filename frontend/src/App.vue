@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useDashboard } from './stores/dashboard'
 import { useDeviceUsage } from './composables/useDeviceUsage'
@@ -18,10 +18,59 @@ import { useUsagePolling } from './composables/useUsagePolling'
 import { useNavigation } from './composables/useNavigation'
 import { aboutPages } from './config/about'
 const { page, aboutPage, navigate, backToMy } = useNavigation()
+const mainContent = ref<HTMLElement>()
+watch([page, aboutPage], () => mainContent.value?.scrollTo(0, 0), { flush: 'post' })
 const profileOpen = ref(false),
   loginOpen = ref(false)
 const { state, currentAccount, refresh, refreshUsage } = useDashboard(),
   usage = useDeviceUsage()
+const checkingUsage = ref(false)
+let checkFeedback: ReturnType<typeof ElMessage> | undefined
+async function showCheckFeedback(message: string, type: 'info' | 'warning' | 'success') {
+  checkFeedback?.close()
+  await nextTick()
+  checkFeedback = ElMessage({ message, type })
+}
+async function checkUsage(device: Device) {
+  if (checkingUsage.value) return
+  checkingUsage.value = true
+  const account = state.accountID
+  checkFeedback?.close()
+  const progress = ElMessage({ message: '正在核对设备状态…', duration: 0 })
+  checkFeedback = progress
+  try {
+    const refreshed = await refreshUsage()
+    if (account !== state.accountID) return
+    if (!refreshed) {
+      await showCheckFeedback('设备状态正在同步，请稍后再核对', 'info')
+      return
+    }
+    const live = state.usage[device.goodsId]
+    if (!live || live.stale) {
+      await showCheckFeedback(
+        '核对失败，暂时无法查询平台状态，请稍后重试或在官方 App 查看',
+        'warning',
+      )
+    } else if (live.state === 'finished' || live.state === 'idle') {
+      await showCheckFeedback('本地使用记录已解除，设备列表已刷新', 'success')
+    } else if (live.state === 'unknown') {
+      await showCheckFeedback(
+        live.note || '平台尚未确认本次使用是否结束，请在官方 App 核对',
+        'warning',
+      )
+    } else {
+      await showCheckFeedback(
+        { starting: '平台仍在确认启动', running: '平台仍显示使用中', stopping: '平台仍在确认结束' }[
+          live.state
+        ],
+        'info',
+      )
+    }
+  } finally {
+    progress.close()
+    checkingUsage.value = false
+  }
+}
 useUsagePolling()
 async function scan() {
   if (state.busy) return
@@ -51,7 +100,7 @@ function openDevice(device: Device) {
   } else if (live?.state === 'running' && live.stop_supported === false) {
     ElMessage.info('本设备不支持远程终止，请使用设备自身的结束方式')
   } else if (live && ['starting', 'running', 'stopping', 'unknown'].includes(live.state)) {
-    void refreshUsage()
+    void checkUsage(device)
   } else if (isIdle(device)) {
     void usage.start(device)
   } else if (device.workStatus === 0) {
@@ -79,7 +128,7 @@ onMounted(refresh)
       @scan="scan"
       @back="backToMy"
     />
-    <main>
+    <main ref="mainContent" class="app-main">
       <AboutView v-if="aboutPage" :page="aboutPage" @open="navigate" />
       <HomeView
         v-else-if="page === 'home'"

@@ -11,12 +11,12 @@ export function useUsagePolling() {
     if (disposed || document.hidden || current !== generation) return
     await dashboard.refreshUsage()
     if (disposed || document.hidden || current !== generation) return
-    if (Date.now() - lastDevices > 15000) {
+    if (Date.now() - lastDevices >= 2000) {
       lastDevices = Date.now()
       await dashboard.refreshDevices()
     }
     if (!disposed && !document.hidden && current === generation)
-      timer = setTimeout(() => tick(current), 4000)
+      timer = setTimeout(() => tick(current), 2000)
   }
   function visibility() {
     if (timer) clearTimeout(timer)
@@ -24,7 +24,7 @@ export function useUsagePolling() {
     if (!document.hidden) void tick(generation)
   }
   onMounted(() => {
-    timer = setTimeout(() => tick(generation), 4000)
+    timer = setTimeout(() => tick(generation), 2000)
     document.addEventListener('visibilitychange', visibility)
   })
   onUnmounted(() => {

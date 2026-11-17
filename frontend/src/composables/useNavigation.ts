@@ -16,7 +16,6 @@ export function useNavigation() {
   const route = ref<Route>(readRoute())
   function sync() {
     route.value = readRoute()
-    window.scrollTo(0, 0)
   }
   window.addEventListener('popstate', sync)
   window.addEventListener('hashchange', sync)

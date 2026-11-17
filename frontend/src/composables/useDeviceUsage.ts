@@ -16,7 +16,23 @@ export function useDeviceUsage() {
       primaryService(options)
     if (dashboard.state.busy) return
     if (!sku?.scanAvailable || !options?.start_supported) {
-      ElMessage.info('服务暂不可用，请刷新设备信息')
+      dashboard.state.busy = true
+      const progress = ElMessage({ message: '正在刷新服务信息…', duration: 0 })
+      try {
+        await dashboard.refreshUsageOptions(d.goodsId)
+        if (accountID !== dashboard.state.accountID) return
+        const refreshed = dashboard.state.options[d.goodsId]
+        ElMessage.info(
+          refreshed?.start_supported && primaryService(refreshed)
+            ? '服务信息已更新，请核对服务和费率后再次点击启动'
+            : '服务暂不可用，请稍后重试',
+        )
+      } catch (e) {
+        ElMessage.warning(e instanceof Error ? e.message : '服务信息刷新失败，请稍后重试')
+      } finally {
+        progress.close()
+        dashboard.state.busy = false
+      }
       return
     }
     dashboard.state.busy = true
