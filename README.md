@@ -16,16 +16,6 @@
 | 结束使用 | 仅对支持远程结束且已确认属于当前助手会话的设备开放         |
 | 关于页面 | 项目仓库、赞助、使用说明和联系方式                         |
 
-当前版本仍在开发中。Android 相机、定位和真实设备使用流程仍需实机验收；独立 APK 尚未接入原生微信一键授权。无法确认的设备状态显示“待确认”，实时费用无法确认时显示“待结算”。
-
-## 界面预览
-
-以下为模拟数据界面，不代表真实账号或订单。
-
-<p>
-  <img src="docs/design/home.png" alt="水到渠成首页" width="280" />
-  <img src="docs/design/my.png" alt="我的页面" width="280" />
-</p>
 
 ## 本地运行
 
@@ -90,24 +80,6 @@ Android 包含运行所需的平台协议配置，不包含电脑账号、账号
 | `npm run build -- --offline` | 使用已有依赖缓存完成打包                   |
 | `npm run clean`              | 清除生成产物，保留本机账号、密钥和研究材料 |
 
-## 上传 GitHub 的范围
-
-**建议通过 Git 提交源码，保留本仓库的 `.gitignore`。网页手动上传不会自动应用忽略规则，不能直接拖入整个项目文件夹。**
-
-| 路径                                 | 是否上传         | 说明                                                                                                                   |
-| ------------------------------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `frontend/`                          | 上传源码         | 包含 `src/`、`public/`、入口和构建配置；排除 `node_modules/`、`dist/` 和 `*.tsbuildinfo`                               |
-| `backend/`                           | 上传源码         | 包含 `cmd/`、`internal/`、`go.mod` 等；排除可执行文件、生成的 `cmd/android/dist/` 和 `runtime-config.json`             |
-| `android/`                           | 上传源码         | 包含 `app/src/`、Gradle 配置；排除 `.gradle/`、`build/`、`app/build/`、`local.properties` 和生成的 `jniLibs/`          |
-| `scripts/`                           | 上传             | 构建、启动、检查及联调脚本；本地工具与凭据需自行准备                                                                   |
-| `docs/`                              | 按忽略规则上传   | 架构、Android、API 和当前界面文档；本地研究报告、抓包记录及设计过程材料已排除                                          |
-| 根目录配置                           | 上传             | `README.md`、`package.json`、`package-lock.json`、`.gitignore`、`.editorconfig`、`.prettierignore`、`.prettierrc.json` |
-| `data/`                              | 不上传           | 账号文件、加密密钥和私有平台配置                                                                                       |
-| `work/`、`.tools/`、`.cache/`        | 不上传           | 原始研究材料、本地工具、令牌、日志与缓存                                                                               |
-| `node_modules/`、`dist/`、`release/` | 不上传到源码仓库 | 依赖和生成产物；安装包如需发布，可另放 GitHub Releases，发布前检查其内嵌配置                                           |
-| `.env*`、签名密钥、抓包文件          | 不上传           | 本机环境变量、证书私钥、签名文件、HAR / PCAP 等                                                                        |
-
-在项目根目录准备好 Git 仓库后，可先查看待上传清单：
 
 ```sh
 git status --short --untracked-files=all
